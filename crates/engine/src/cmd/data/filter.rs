@@ -46,10 +46,14 @@ pub(super) fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
 /// As in Excel, a PivotTable report filters through its own fields: a sheet AutoFilter over it
 /// would list "Grand Total" as a value and hide report rows behind the PivotTable's back (#2045).
 fn refuse_over_pivot(s: &Session, sheet: usize, r: RangeRef, id: &str) -> Result<()> {
-    if s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.pivots.iter().any(|pt| pt.last_range.is_some_and(|pr| pr.intersects(&r)))) {
+    if s.doc()?.wb.sheet(sheet).is_some_and(|sh| over_pivot(sh, r)) {
         return Err(EngineError::Disabled(id.into(), "Filter isn't available in a PivotTable report.".into()));
     }
     Ok(())
+}
+
+fn over_pivot(sh: &Sheet, r: RangeRef) -> bool {
+    sh.pivots.iter().any(|pt| pt.last_range.is_some_and(|pr| pr.intersects(&r)))
 }
 
 /// Turn a sheet AutoFilter on over `p.range`, or over the data range of the selection.
@@ -178,7 +182,8 @@ fn filter_blank(v: &Value) -> bool {
 }
 
 /// Excel grows an AutoFilter range when a value is entered in the row right below it, in one of its columns (#2342).
-/// A table's own filter is left to the table, and a row typed after a blank row does not count.
+/// A table's own filter is left to the table, a row typed after a blank row does not count, and the
+/// range never grows into a PivotTable report (#2045).
 /// A formula counts before it is calculated: this runs inside the edit, ahead of the recalc.
 pub(crate) fn grow_autofilter(sh: &mut Sheet, at: CellRef) {
     if !sh.cells.get(at).is_some_and(|c| !filter_blank(&c.value) || c.formula.is_some()) {
@@ -190,6 +195,9 @@ pub(crate) fn grow_autofilter(sh: &mut Sheet, at: CellRef) {
         return;
     }
     let grown = RangeRef::new(r.start, CellRef::new(at.row, r.end.col));
+    if over_pivot(sh, grown) {
+        return;
+    }
     if let Some(af) = sh.autofilter.as_mut() {
         af.range = grown;
     }

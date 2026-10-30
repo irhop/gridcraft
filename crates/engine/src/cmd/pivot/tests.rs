@@ -1054,3 +1054,17 @@ fn an_autofilter_already_over_a_report_takes_no_new_criteria() {
     assert!(s.doc().unwrap().wb.active().unwrap().autofilter.as_ref().unwrap().criteria.is_empty());
     assert!(s.execute("data.filterBy", json!({"column": col, "clear": true})).is_ok());
 }
+
+#[test]
+fn an_autofilter_does_not_grow_into_a_report_below_it() {
+    // Typing beside a report in the row under an AutoFilter would pull the report's row into it (#2045).
+    let mut s = sales();
+    s.execute("insert.pivotTable", json!({"destination": "Sheet1!J10", "rows": ["Region"], "values": ["Sales"]})).unwrap();
+    let r = pt(&s).last_range.unwrap();
+    let (top, below) = (CellRef::new(r.start.row - 2, 7), CellRef::new(r.start.row - 1, r.start.col));
+    s.execute("range.setValues", json!({"range": top.a1(), "values": [["Name", "Qty", "x"], ["a", 1, 2]]})).unwrap();
+    let af = gridcraft_core::RangeRef::new(top, below).a1();
+    s.execute("data.filter", json!({"range": af})).unwrap();
+    s.execute("cell.set", json!({"cell": CellRef::new(r.start.row, 7).a1(), "input": "b"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().autofilter.as_ref().map(|a| a.range.a1()), Some(af));
+}
