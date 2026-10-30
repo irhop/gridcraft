@@ -40,7 +40,7 @@ pub(super) fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
             Ok(json!({"filter": false}))
         });
     }
-    install_filter(s, p)
+    install_filter(s, p, "data.filter")
 }
 
 /// As in Excel, a PivotTable report filters through its own fields: a sheet AutoFilter over it
@@ -53,8 +53,8 @@ fn refuse_over_pivot(s: &Session, sheet: usize, r: RangeRef, id: &str) -> Result
 }
 
 /// Turn a sheet AutoFilter on over `p.range`, or over the data range of the selection.
-fn install_filter(s: &mut Session, p: &Json) -> Result<Json> {
-    let (sheet, mut r) = data_target(s, p, "data.filter")?;
+fn install_filter(s: &mut Session, p: &Json, id: &str) -> Result<Json> {
+    let (sheet, mut r) = data_target(s, p, id)?;
     // A selected header row filters the data below it (#201).
     if p.get("range").is_none() && r.height() == 1 {
         let d = s.doc()?;
@@ -64,7 +64,7 @@ fn install_filter(s: &mut Session, p: &Json) -> Result<Json> {
             r = RangeRef::new(r.start, CellRef::new(below, r.end.col));
         }
     }
-    refuse_over_pivot(s, sheet, r, "data.filter")?;
+    refuse_over_pivot(s, sheet, r, id)?;
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.autofilter = Some(AutoFilter { range: r, criteria: vec![] });
         Ok(json!({"filter": true, "range": r.a1()}))
@@ -78,7 +78,7 @@ pub(super) fn filter_by(s: &mut Session, p: &Json) -> Result<Json> {
     let af = match &sh.autofilter {
         Some(a) => a.clone(),
         None => {
-            install_filter(s, &json!({}))?;
+            install_filter(s, &json!({}), "data.filterBy")?;
             s.doc()?.wb.sheet(sheet).and_then(|sh| sh.autofilter.clone()).ok_or_else(|| EngineError::Other("no filter".into()))?
         }
     };

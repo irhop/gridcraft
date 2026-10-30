@@ -1026,7 +1026,9 @@ fn sheet_filter_is_refused_over_a_report() {
     s.execute("selection.set", json!({"cell": inside})).unwrap();
     assert!(matches!(s.execute("data.filter", json!({})), Err(crate::EngineError::Disabled(..))));
     assert!(matches!(s.execute("data.filter", json!({"range": r.a1()})), Err(crate::EngineError::Disabled(..))));
-    assert!(s.execute("data.filterBy", json!({"column": 0, "values": ["East"]})).is_err());
+    assert!(
+        matches!(s.execute("data.filterBy", json!({"column": 0, "values": ["East"]})), Err(crate::EngineError::Disabled(id, _)) if id == "data.filterBy")
+    );
     assert!(s.doc().unwrap().wb.active().unwrap().autofilter.is_none());
     assert_eq!(val(&s, &CellRef::new(r.end.row, r.start.col + 1).a1()), Value::Number(TOTAL));
     // Cells beside the report still filter.
@@ -1046,7 +1048,9 @@ fn an_autofilter_already_over_a_report_takes_no_new_criteria() {
     std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(sheet).unwrap().autofilter =
         Some(gridcraft_model::AutoFilter { range: r, criteria: vec![] });
     let col = r.start.col;
-    assert!(matches!(s.execute("data.filterBy", json!({"column": col, "values": ["East"]})), Err(crate::EngineError::Disabled(..))));
+    assert!(
+        matches!(s.execute("data.filterBy", json!({"column": col, "values": ["East"]})), Err(crate::EngineError::Disabled(id, _)) if id == "data.filterBy")
+    );
     assert!(s.doc().unwrap().wb.active().unwrap().autofilter.as_ref().unwrap().criteria.is_empty());
     assert!(s.execute("data.filterBy", json!({"column": col, "clear": true})).is_ok());
 }
