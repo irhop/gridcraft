@@ -1033,3 +1033,20 @@ fn sheet_filter_is_refused_over_a_report() {
     s.execute("range.setValues", json!({"range": "H1", "values": [["Name"], ["a"], ["b"]]})).unwrap();
     assert!(s.execute("data.filter", json!({"range": "H1:H3"})).is_ok());
 }
+
+#[test]
+fn an_autofilter_already_over_a_report_takes_no_new_criteria() {
+    // A sheet AutoFilter saved over a report before #2045 can be cleared, but filters nothing new.
+    let mut s = sales();
+    s.execute("insert.pivotTable", json!({})).unwrap();
+    s.execute("pivot.addField", json!({"field": "Region", "area": "rows"})).unwrap();
+    s.execute("pivot.addField", json!({"field": "Sales", "area": "values"})).unwrap();
+    let r = pt(&s).last_range.unwrap();
+    let sheet = s.doc().unwrap().wb.active_sheet();
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(sheet).unwrap().autofilter =
+        Some(gridcraft_model::AutoFilter { range: r, criteria: vec![] });
+    let col = r.start.col;
+    assert!(matches!(s.execute("data.filterBy", json!({"column": col, "values": ["East"]})), Err(crate::EngineError::Disabled(..))));
+    assert!(s.doc().unwrap().wb.active().unwrap().autofilter.as_ref().unwrap().criteria.is_empty());
+    assert!(s.execute("data.filterBy", json!({"column": col, "clear": true})).is_ok());
+}

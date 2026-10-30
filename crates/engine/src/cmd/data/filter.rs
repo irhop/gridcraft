@@ -43,6 +43,15 @@ pub(super) fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
     install_filter(s, p)
 }
 
+/// As in Excel, a PivotTable report filters through its own fields: a sheet AutoFilter over it
+/// would list "Grand Total" as a value and hide report rows behind the PivotTable's back (#2045).
+fn refuse_over_pivot(s: &Session, sheet: usize, r: RangeRef, id: &str) -> Result<()> {
+    if s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.pivots.iter().any(|pt| pt.last_range.is_some_and(|pr| pr.intersects(&r)))) {
+        return Err(EngineError::Disabled(id.into(), "Filter isn't available in a PivotTable report.".into()));
+    }
+    Ok(())
+}
+
 /// Turn a sheet AutoFilter on over `p.range`, or over the data range of the selection.
 fn install_filter(s: &mut Session, p: &Json) -> Result<Json> {
     let (sheet, mut r) = data_target(s, p, "data.filter")?;
@@ -55,11 +64,7 @@ fn install_filter(s: &mut Session, p: &Json) -> Result<Json> {
             r = RangeRef::new(r.start, CellRef::new(below, r.end.col));
         }
     }
-    // As in Excel, a PivotTable report filters through its own fields: a sheet AutoFilter over it
-    // would list "Grand Total" as a value and hide report rows behind the PivotTable's back (#2045).
-    if s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.pivots.iter().any(|pt| pt.last_range.is_some_and(|pr| pr.intersects(&r)))) {
-        return Err(EngineError::Disabled("data.filter".into(), "Filter isn't available in a PivotTable report.".into()));
-    }
+    refuse_over_pivot(s, sheet, r, "data.filter")?;
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.autofilter = Some(AutoFilter { range: r, criteria: vec![] });
         Ok(json!({"filter": true, "range": r.a1()}))
@@ -77,6 +82,11 @@ pub(super) fn filter_by(s: &mut Session, p: &Json) -> Result<Json> {
             s.doc()?.wb.sheet(sheet).and_then(|sh| sh.autofilter.clone()).ok_or_else(|| EngineError::Other("no filter".into()))?
         }
     };
+    // An AutoFilter already over a report (from an older session or a file) can still be cleared.
+    let clear = bool_param(p, "clear").unwrap_or(false);
+    if !clear {
+        refuse_over_pivot(s, sheet, af.range, "data.filterBy")?;
+    }
     let col = match col_param(p.get("column"), af.range.start.col) {
         Some(c) => c,
         // A number too large to be a column is outside the filter range, not a missing parameter.
@@ -87,7 +97,7 @@ pub(super) fn filter_by(s: &mut Session, p: &Json) -> Result<Json> {
         return Err(bad("data.filterBy", "column outside the filter range"));
     }
     let off = col - af.range.start.col;
-    let crit = if bool_param(p, "clear").unwrap_or(false) {
+    let crit = if clear {
         None
     } else if let Some(vals) = p.get("values").and_then(Json::as_array) {
         Some(FilterCriterion::Values {
